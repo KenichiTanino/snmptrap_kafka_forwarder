@@ -1,0 +1,35 @@
+[Unit]
+Description=SNMP Trap to Kafka Forwarder
+After=network.target
+
+[Service]
+# 実行ユーザーとグループ (セキュリティのため非特権ユーザーを推奨)
+User=nobody
+Group=nogroup
+
+# 実行するコマンド
+# ExecStartのパスは環境に合わせて修正してください
+WorkingDirectory=/home/tanino/gemini-cli/20250719_snmptrap
+ExecStart=/usr/bin/python3 /home/tanino/gemini-cli/20250719_snmptrap/snmp_kafka_forwarder.py
+
+# SIGHUPによるリロード設定
+ExecReload=/bin/kill -HUP $MAINPID
+
+# サービスが失敗した際の再起動ポリシー
+Restart=on-failure
+RestartSec=5s
+
+# 標準出力と標準エラー出力の転送先
+StandardOutput=journal
+StandardError=journal
+
+# セキュリティ設定
+# /var/tmpへの書き込み権限を確保
+ReadWritePaths=/var/tmp
+# プログラムが配置されているディレクトリへの読み取り権限
+ReadOnlyPaths=/home/tanino/gemini-cli/20250719_snmptrap
+# プライベートな/tmpと/var/tmpを有効にする
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

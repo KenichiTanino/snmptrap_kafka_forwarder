@@ -1,0 +1,12 @@
+{
+  "snmp": {
+    "host": "0.0.0.0",
+    "port": 16200,
+    "communities": ["public", "private", "internal"]
+  },
+  "kafka": {
+    "bootstrap_servers": "localhost:9092",
+    "topic": "snmp-traps",
+    "security_protocol": "PLAINTEXT"
+  }
+}
