@@ -1,0 +1,12 @@
+[project]
+name = "snmptrap_to_kakfa"
+version = "0.1.0"
+description = "snmp trap to kafka"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "kafka-python>=2.2.15",
+    "pysmi>=1.6.2",
+    "pysnmp>=7.1.21",
+    "pysnmp-mibs>=0.1.6",
+]
