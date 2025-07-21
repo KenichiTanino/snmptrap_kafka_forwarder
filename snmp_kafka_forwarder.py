@@ -57,7 +57,7 @@ def create_trap_callback(producer, kafka_topic):
     """SNMPトラップ受信時のコールバック関数を作成する"""
     def trap_callback(snmpEngine, stateReference, _contextEngineId, contextName,
                       varBinds, _cbCtx):
-        _transportDomain, transportAddress = snmpEngine.msgAndPduDsp.getTransportInfo(stateReference)
+        _transportDomain, transportAddress = snmpEngine.msgAndPduDsp.get_transport_info(stateReference)
         source_ip, source_port = transportAddress
         community_name = contextName.prettyPrint()
 
@@ -98,6 +98,11 @@ async def setup_snmp_engine(snmp_config, callback):
     communities = snmp_config.get('communities', ['public'])
 
     snmpEngine = engine.SnmpEngine()
+
+    # MIBs are expected to be in pysnmp_mibs directory
+    # mibBuilder = snmpEngine.get  ('mibBuilder')
+    # mibBuilder.add_mib_sources(builder.DirMibSource(str(Path(__file__).resolve().parent / "compiled_mibs")))
+
     config.add_transport(
         snmpEngine,
         udp.DOMAIN_NAME,
