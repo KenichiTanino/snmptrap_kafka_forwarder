@@ -1,0 +1,235 @@
+PEAKFLOW-DOS-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+    MODULE-IDENTITY, OBJECT-TYPE, NOTIFICATION-TYPE, TimeTicks,
+    Integer32, Unsigned32, IpAddress
+        FROM SNMPv2-SMI
+    DisplayString
+        FROM SNMPv2-TC
+    arbornetworksProducts
+        FROM ARBOR-SMI;
+
+-- =================================================================================
+peakflowDosMIB MODULE-IDENTITY
+    LAST-UPDATED "201406240000Z"
+    ORGANIZATION "Arbor Networks, Inc."
+    CONTACT-INFO "
+        Arbor Networks, Inc.
+        Arbor Technical Assistance Center
+        Postal: 76 Blanchard Road
+                Burlington, MA 01803
+                USA
+        Tel: +1 866 212 7267 (toll free)
+             +1 781 362 4300
+        Email: support@arbor.net
+    "
+    DESCRIPTION "Peakflow DoS MIB"
+    -- Revision log, reverse chrono
+    REVISION "201511170000Z"
+    DESCRIPTION "Add pdosAnomalyIpVersion to Anomaly notifications"
+    REVISION "201406240000Z"
+    DESCRIPTION "Add pdosAnomalyIpVersion"
+    REVISION "201308190000Z"
+    DESCRIPTION "Updated contact information"
+    REVISION "201005200000Z"
+    DESCRIPTION "Correct values of max-access for objets."
+    REVISION "200903300000Z" -- March 30, 2009
+    DESCRIPTION "Update contact group name."
+    REVISION "200811130000Z" -- November 13, 2008
+    DESCRIPTION "Update company address."
+    REVISION "200805080000Z" -- May 8, 2008
+    DESCRIPTION "Updated SIZE of pdosAnomalyTcpFlags to be (0..8)."
+    REVISION "200804240000Z" -- April 24, 2008
+    DESCRIPTION "Add pdosAnomalyProto to dnsMisuseAnomaly trap"
+    REVISION "200801080000Z" -- January 8, 2008
+    DESCRIPTION "Clean up use of pdosAnomalyProto and pdosTcpFlags"
+    REVISION "200712140000Z" -- December 14, 2007
+    DESCRIPTION "Add udpMisuseAnomaly."
+    REVISION "200511230000Z" -- November 23, 2005
+    DESCRIPTION "Update status of obsolete OIDs."
+    REVISION "200509120000Z" -- September 12, 2005
+    DESCRIPTION "Apply fixes from validation.
+    "
+    ::= { arbornetworksProducts 1 }
+
+-- =================================================================================
+-- Anomaly Notifications
+-- =================================================================================
+
+pdosAnomalyNotifications OBJECT IDENTIFIER ::= { peakflowDosMIB 0 }
+
+pdosAnomalyStartNotification NOTIFICATION-TYPE
+    OBJECTS {
+        pdosAnomalyDirection,
+        pdosAnomalyStart,
+        pdosAnomalyDuration,
+        pdosAnomalyClassification,
+        pdosAnomalyIpVersion
+    }
+    STATUS current
+    DESCRIPTION "
+        A pdosAnomalyStart trap signifies that a new anomaly has been detected.
+    "
+    ::= { pdosAnomalyNotifications 1 }
+
+pdosAnomalyEnd NOTIFICATION-TYPE
+    OBJECTS {
+        pdosAnomalyDirection,
+        pdosAnomalyStart,
+        pdosAnomalyDuration,
+        pdosAnomalyClassification,
+        pdosAnomalyIpVersion
+    }
+    STATUS current
+    DESCRIPTION "
+        A pdosAnomalyEnd trap signifies that an anomaly has ended.
+    "
+    ::= { pdosAnomalyNotifications 2 }
+
+pdosAnomalyUpdate NOTIFICATION-TYPE
+    OBJECTS {
+        pdosAnomalyDirection,
+        pdosAnomalyStart,
+        pdosAnomalyDuration,
+        pdosAnomalyClassification,
+        pdosAnomalyIpVersion
+    }
+    STATUS current
+    DESCRIPTION "
+        A pdosAnomalyUpdate trap signifies that an anomaly has been updated.
+    "
+    ::= { pdosAnomalyNotifications 3 }
+
+pdosAnomalyDnsMisuse NOTIFICATION-TYPE
+    OBJECTS {
+        pdosAnomalyDirection,
+        pdosAnomalyStart,
+        pdosAnomalyDuration,
+        pdosAnomalyClassification,
+        pdosAnomalyProto,
+        pdosAnomalyIpVersion
+    }
+    STATUS current
+    DESCRIPTION "
+        A pdosAnomalyDnsMisuse trap signifies that a DNS misuse anomaly has been detected.
+    "
+    ::= { pdosAnomalyNotifications 4 }
+
+pdosAnomalyUdpMisuse NOTIFICATION-TYPE
+    OBJECTS {
+        pdosAnomalyDirection,
+        pdosAnomalyStart,
+        pdosAnomalyDuration,
+        pdosAnomalyClassification,
+        pdosAnomalyProto,
+        pdosAnomalyIpVersion
+    }
+    STATUS current
+    DESCRIPTION "
+        A pdosAnomalyUdpMisuse trap signifies that a UDP misuse anomaly has been detected.
+    "
+    ::= { pdosAnomalyNotifications 5 }
+
+-- =================================================================================
+-- Anomaly Objects
+-- =================================================================================
+
+pdosAnomalyObjects OBJECT IDENTIFIER ::= { peakflowDosMIB 1 }
+
+pdosAnomalyDirection OBJECT-TYPE
+    SYNTAX      INTEGER {
+        inbound(1),
+        outbound(2)
+    }
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "
+        The direction of the anomaly.
+    "
+    ::= { pdosAnomalyObjects 1 }
+
+pdosAnomalyStart OBJECT-TYPE
+    SYNTAX      TimeTicks
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "
+        The time at which the anomaly started.
+    "
+    ::= { pdosAnomalyObjects 2 }
+
+pdosAnomalyDuration OBJECT-TYPE
+    SYNTAX      TimeTicks
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "
+        The duration of the anomaly.
+    "
+    ::= { pdosAnomalyObjects 3 }
+
+pdosAnomalyClassification OBJECT-TYPE
+    SYNTAX      DisplayString
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "
+        The classification of the anomaly.
+    "
+    ::= { pdosAnomalyObjects 4 }
+
+pdosAnomalyProto OBJECT-TYPE
+    SYNTAX      INTEGER {
+        other(0),
+        icmp(1),
+        igmp(2),
+        ggp(3),
+        ip(4),
+        st(5),
+        tcp(6),
+        udp(17),
+        idp(22),
+        sctp(132)
+    }
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "
+        The protocol of the anomaly.
+    "
+    ::= { pdosAnomalyObjects 5 }
+
+pdosAnomalyTcpFlags OBJECT-TYPE
+    SYNTAX      BITS {
+        fin(0),
+        syn(1),
+        rst(2),
+        psh(3),
+        ack(4),
+        urg(5),
+        ece(6),
+        cwr(7)
+    }
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "
+        The TCP flags of the anomaly.
+    "
+    ::= { pdosAnomalyObjects 6 }
+
+pdosAnomalyIpVersion OBJECT-TYPE
+    SYNTAX      INTEGER {
+        ipv4(1),
+        ipv6(2)
+    }
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION "
+        The IP version of the anomaly.
+    "
+    ::= { pdosAnomalyObjects 7 }
+
+pdosUrl OBJECT-TYPE
+    SYNTAX      DisplayString
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION "URL associated with the anomaly event."
+    ::= { pdosAnomalyObjects 8 }
+
+END

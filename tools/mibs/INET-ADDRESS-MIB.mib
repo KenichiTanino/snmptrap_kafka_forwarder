@@ -1,0 +1,125 @@
+INET-ADDRESS-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+    MODULE-IDENTITY, mib-2, Unsigned32
+        FROM SNMPv2-SMI
+    TEXTUAL-CONVENTION
+        FROM SNMPv2-TC;
+
+inetAddressMIB MODULE-IDENTITY
+    LAST-UPDATED "200502040000Z"
+    ORGANIZATION "IETF Operations and Management Area"
+    CONTACT-INFO
+            "Juergen Schoenwaelder (Editor)
+            International University Bremen
+            P.O. Box 750 561
+            28725 Bremen, Germany
+            Phone: +49 421 200-3587
+            EMail: j.schoenwaelder@iu-bremen.de
+            Send comments to <ietfmibs@ops.ietf.org>."
+    DESCRIPTION
+            "This MIB module defines textual conventions for representing
+            Internet addresses. An Internet address can be an IPv4 address,
+            an IPv6 address, or a DNS domain name. This module also defines
+            textual conventions for Internet port numbers, autonomous system
+            numbers, and the length of an Internet address prefix.
+            Copyright (C) The Internet Society (2005). This version of
+            this MIB module is part of RFC 4001; see the RFC itself for
+            full legal notices."
+    REVISION "200502040000Z"
+    DESCRIPTION
+            "Initial revision, published as RFC 4001."
+    ::= { mib-2 35 }
+
+
+InetAddressType ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "2d"
+    STATUS       current
+    DESCRIPTION
+            "A value that represents a type of Internet address.
+
+            The Internet address type is given by a value of this
+            textual convention. The corresponding Internet address
+            is an octet string whose interpretation depends on the
+            value of this textual convention.
+
+            The following table lists the defined Internet address
+            types:
+
+            ipv4(1)         an IPv4 address as defined in RFC 790.
+                            The address is 4 octets long in network
+                            byte order.
+
+            ipv6(2)         an IPv6 address as defined in RFC 2373.
+                            The address is 16 octets long in network
+                            byte order.
+
+            ipv4z(3)        an IPv4 address with a zone index as
+                            defined in RFC 4007. The address is 8
+                            octets long in network byte order. The
+                            first 4 octets are the IPv4 address and
+                            the last 4 octets are the zone index.
+
+            ipv6z(4)        an IPv6 address with a zone index as
+                            defined in RFC 4007. The address is 20
+                            octets long in network byte order. The
+                            first 16 octets are the IPv6 address and
+                            the last 4 octets are the zone index.
+
+            dns(16)         a DNS name as defined in RFC 1035. The
+                            name is an octet string whose length is
+                            between 1 and 255 octets. The name MUST
+                            be encoded using UTF-8. The name MUST be
+                            fully qualified."
+    SYNTAX       INTEGER {
+                     unknown(0),
+                     ipv4(1),
+                     ipv6(2),
+                     ipv4z(3),
+                     ipv6z(4),
+                     dns(16)
+                 }
+
+InetAddress ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "1d"
+    STATUS       current
+    DESCRIPTION
+            "A value that represents an Internet address.
+
+            The Internet address is represented as an octet string
+            whose interpretation depends on the value of an
+            InetAddressType object. The value of this object is
+            always stored in network byte order."
+    SYNTAX       OCTET STRING (SIZE (0..255))
+
+InetPortNumber ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "1d"
+    STATUS       current
+    DESCRIPTION
+            "A value that represents a port number associated with an
+            Internet protocol. The port number is represented as an
+            unsigned 32-bit integer. The value of this object is
+            always stored in network byte order."
+    SYNTAX       Unsigned32 (0..65535)
+
+InetAutonomousSystemNumber ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "1d"
+    STATUS       current
+    DESCRIPTION
+            "A value that represents an autonomous system number.
+            The autonomous system number is represented as an unsigned
+            32-bit integer. The value of this object is always stored
+            in network byte order."
+    SYNTAX       Unsigned32
+
+InetAddressPrefixLength ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "1d"
+    STATUS       current
+    DESCRIPTION
+            "A value that represents the length of an Internet address
+            prefix. The prefix length is represented as an unsigned
+            32-bit integer. The value of this object is always stored
+            in network byte order."
+    SYNTAX       Unsigned32 (0..128)
+
+END
