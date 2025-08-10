@@ -1,34 +1,51 @@
 # SNMP Trap to Kafka Forwarder Design
 
-## 1. 目的
+## 1. 概要
 
-受信したSNMPトラップメッセージを解析し、指定されたKafkaトピックにJSON形式で転送するPythonアプリケーションを開発する。
+このアプリケーションは、SNMP トラップを受信し、その内容を JSON 形式に変換して Apache Kafka の指定されたトピックに転送する非同期フォワーダーです。
 
-## 2. 機能要件
+`pysnmp`ライブラリを利用して SNMP トラップを受信・解析し、`kafka-python`ライブラリを使用して Kafka へメッセージを送信します。設定ファイルによる柔軟な設定変更や、シグナルによるリロード・シャットダウンに対応しています。
 
--   指定されたIPアドレスとポートでSNMPトラップ（v1, v2c, v3）を受信する。
--   受信したトラップデータを人間が判読可能な形式（JSON）にパースする。
--   パースしたデータを指定されたKafkaブローカーのトピックに送信する。
--   設定は外部の設定ファイル（`config.json`）から読み込む。
--   アプリケーションの動作状況を標準出力にロギングする。
+### 1.1. アーキテクチャ概要図
 
-## 3. 技術スタック
+```
++----------------+      +--------------------------+      +----------------+      +-------------------+
+|                |      |                          |      |                |      |                   |
+|  SNMP-enabled  |----->|  snmp_kafka_forwarder.py |----->|      Kafka     |----->|  Kafka Consumer   |
+|    Devices     | SNMP |       (UDP Listener)     | JSON |(Message Broker)| JSON |                   |
+|                | Trap |                          |      |                |      |                   |
++----------------+      +--------------------------+      +----------------+      +-------------------+
+                          |
+                          | 1. Listen for SNMP traps on UDP port.
+                          | 2. Parse trap using pre-compiled MIBs.
+                          | 3. Convert to JSON.
+                          | 4. Send to Kafka topic.
+```
 
--   **プログラミング言語:** Python 3
--   **主要ライブラリ:**
-    -   `pysnmp`: SNMPトラップの受信と解析
-    -   `kafka-python`: Kafkaへのデータ送信
+## 2. 主な機能
 
-## 4. 設定ファイル (`config.json`)
+- **SNMP トラップ受信**: 指定した IP アドレスとポートで SNMP v1/v2c トラップを待ち受けます。
+- **MIB による OID の名前解決**: `tools/compiled_mibs`ディレクトリにあるコンパイル済みの MIB ファイルを使用して、受信したトラップの OID（Object Identifier）を人間が読みやすいシンボル名（例: `SNMPv2-MIB::sysUpTime.0`）に解決します。
+- **JSON への変換**: 受信したトラップの情報を、送信元 IP、コミュニティ名、タイムスタンプ、変数束縛（VarBinds）などを含む構造化された JSON 形式に変換します。
+- **Kafka への転送**: 変換した JSON データを指定された Kafka ブローカーのトピックへ非同期で送信します。
+- **設定の外部化**: `config.json`ファイルにより、リッスンするインターフェース、ポート、コミュニティ、Kafka の接続情報などを容易に変更できます。
+- **動的な設定リロード**: `SIGHUP`シグナルを受信すると、アプリケーションを停止することなく設定ファイルを再読み込みします。
+- **安全なシャットダウン**: `SIGINT` (Ctrl+C) や `SIGTERM` シグナルを捕捉し、リソースを解放して安全に終了します。
+- **非同期処理**: `asyncio`を利用して、効率的な I/O 処理を実現しています。
+- **堅牢なロギングとエラーハンドリング**:
+  - アプリケーションの動作状況を標準出力にロギングします。
+  - 予期せぬエラーでクラッシュした際には、詳細なスタックトレースを含むクラッシュレポートを`/var/tmp/`ディレクトリに保存します。
 
-アプリケーションの動作は以下のJSON形式の設定ファイルで管理する。
+## 3. 設定 (`config.json`)
+
+アプリケーションの動作は、以下の JSON 形式の設定ファイルで管理します。
 
 ```json
 {
   "snmp": {
     "host": "0.0.0.0",
     "port": 162,
-    "community": "public"
+    "communities": ["public", "private"]
   },
   "kafka": {
     "bootstrap_servers": "localhost:9092",
@@ -38,75 +55,87 @@
 }
 ```
 
--   **snmp.host**: トラップを受信するリスニングIPアドレス。
--   **snmp.port**: トラップを受信するリスニングポート。
--   **snmp.community**: SNMPv1/v2cのコミュニティ名。
--   **kafka.bootstrap_servers**: 接続先のKafkaブローカーのリスト。
--   **kafka.topic**: メッセージを送信するKafkaトピック名。
--   **kafka.security_protocol**: Kafkaとの接続に使用するセキュリティプロトコル（例: `PLAINTEXT`, `SSL`）。
+- `snmp.host`: トラップを受信するリスニング IP アドレス。
+- `snmp.port`: トラップを受信するリスニング UDP ポート。
+- `snmp.communities`: 受け入れる SNMP コミュニティ名のリスト。
+- `kafka.bootstrap_servers`: 接続先の Kafka ブローカーのリスト（カンマ区切り）。
+- `kafka.topic`: メッセージを送信する Kafka トピック名。
+- `kafka.security_protocol`: Kafka との接続に使用するセキュリティプロトコル（例: `PLAINTEXT`, `SSL`）。
 
-## 5. データフォーマット
+## 4. Kafka へ送信されるデータフォーマット
 
-Kafkaに送信されるメッセージは、以下の情報を含むJSON形式とする。
+Kafka に送信されるメッセージは、以下の情報を含む JSON 形式です。
 
 ```json
 {
-  "source_ip": "192.168.1.1",
+  "source_ip": "127.0.0.1",
   "source_port": 49152,
   "community": "public",
-  "protocol_version": "v2c",
-  "timestamp": "2025-07-20T10:30:00Z",
+  "protocol_version": "v1/v2c",
+  "timestamp": "2025-08-10T15:00:00.123456Z",
   "variables": [
     {
-      "oid": "1.3.6.1.6.3.1.1.4.1.0",
-      "oid_full": "SNMPv2-MIB::snmpTrapOID.0",
-      "value": "1.3.6.1.4.1.8072.2.3.0.1",
-      "value_type": "OBJECT IDENTIFIER"
-    },
-    {
-      "oid": "1.3.6.1.2.1.1.3.0",
-      "oid_full": "DISMAN-EVENT-MIB::sysUpTimeInstance",
+      "oid": "SNMPv2-MIB::sysUpTime.0",
+      "oid_full": "1.3.6.1.2.1.1.3.0",
       "value": "12345",
       "value_type": "TimeTicks"
     },
     {
-      "oid": "1.3.6.1.4.1.8072.2.3.2.1",
-      "oid_full": "NET-SNMP-EXAMPLES-MIB::netSnmpExampleString",
-      "value": "Hello, World!",
-      "value_type": "OCTET STRING"
+      "oid": "SNMPv2-MIB::snmpTrapOID.0",
+      "oid_full": "1.3.6.1.6.3.1.1.4.1.0",
+      "value": "PEAKFLOW-SP-MIB::peakflowDosAlertClear",
+      "value_type": "ObjectIdentifier"
     }
   ]
 }
 ```
 
-## 6. プログラムの構造
+## 5. 実行方法
 
-1.  **初期化**:
-    -   `config.json`を読み込み、設定をグローバル変数または設定クラスに格納する。
-    -   Kafkaプロデューサーを初期化し、接続を確立する。
-2.  **SNMPトラップ受信機**:
-    -   `pysnmp`の`SnmpEngine`を初期化する。
-    -   設定ファイルの情報に基づき、リスニングエンドポイントとコミュニティを設定する。
-    -   トラップを受信した際に呼び出されるコールバック関数を登録する。
-3.  **コールバック関数 (`trap_callback`)**:
-    -   受信したトラップデータ（PDU）と送信元アドレスを受け取る。
-    -   PDUからOIDとVarBinds（変数束縛）を抽出する。
-    -   抽出したデータを上記のJSONフォーマットに従って整形する。
-    -   整形したJSONメッセージをKafkaプロデューサー経由で送信する。
-    -   処理の成功または失敗をロギングする。
-4.  **メイン処理**:
-    -   初期化処理を呼び出す。
-    -   SNMPトラップ受信機を起動し、無限ループで待機させる。
-    -   `KeyboardInterrupt`（Ctrl+C）を捕捉し、安全にシャットダウン処理を行う。
+### 5.1. 依存関係のインストール
 
-## 7. 実行方法
+`pyproject.toml`に記載された依存関係をインストールします。
 
-1.  必要なライブラリをインストールする。
-    ```bash
-    pip install pysnmp kafka-python
-    ```
-2.  `config.json`を作成・編集する。
-3.  以下のコマンドでアプリケーションを起動する。
-    ```bash
-    python snmp_kafka_forwarder.py
-    ```
+```bash
+# uvなどのパッケージ管理ツールを使用
+pip install uv
+uv pip install -r requirements.txt # もしくは pyproject.toml から直接
+```
+
+### 5.2. MIB のコンパイル
+
+OID の名前解決を機能させるには、使用する MIB ファイルをコンパイルしておく必要があります。
+
+```bash
+# (必要に応じて `tools/compile_mib.py` などのスクリプトを実行)
+```
+
+### 5.3. 設定ファイルの準備
+
+`config.json.sample`をコピーして`config.json`を作成し、環境に合わせて内容を編集します。
+
+```bash
+cp config.json.sample config.json
+vi config.json
+```
+
+### 5.4. アプリケーションの起動
+
+以下のコマンドでアプリケーションを起動します。
+
+```bash
+python snmp_kafka_forwarder.py
+```
+
+## 6. シグナルハンドリング
+
+- **`SIGHUP`**: 設定ファイル `config.json` を再読み込みし、Kafka プロデューサーと SNMP リスナーを再初期化します。
+- **`SIGINT`, `SIGTERM`**: アプリケーションを安全にシャットダウンします。
+
+## 7. 技術スタック
+
+- **プログラミング言語**: Python 3
+- **非同期フレームワーク**: `asyncio`
+- **主要ライブラリ**:
+  - `pysnmp`: SNMP トラップの受信と解析
+  - `kafka-python`: Kafka へのデータ送信

@@ -4,19 +4,25 @@ import signal
 import asyncio
 import traceback
 from datetime import datetime
+from pathlib import Path
 
 from kafka import KafkaProducer
 from pysnmp.entity import engine, config
 from pysnmp.entity.rfc3413 import ntfrcv
 from pysnmp.carrier.asyncio.dgram import udp
-from pysnmp.proto.api import v2c
+from pysnmp.smi import builder, compiler
+from pysnmp.smi import view, error
+from pysnmp.smi.rfc1902 import ObjectType, ObjectIdentity
+
 
 # --- ロギング設定 ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- グローバルイベント ---
 SHUTDOWN_EVENT = asyncio.Event()
 RELOAD_EVENT = asyncio.Event()
+
 
 def signal_handler(signum):
     """シグナルを処理してイベントをセットする"""
@@ -26,6 +32,7 @@ def signal_handler(signum):
     elif signum in [signal.SIGINT, signal.SIGTERM]:
         logging.info(f"{signal.Signals(signum).name}シグナルを受信しました。シャットダウンします。")
         SHUTDOWN_EVENT.set()
+
 
 def load_config(config_path='config.json'):
     """設定ファイルを読み込む"""
@@ -39,49 +46,77 @@ def load_config(config_path='config.json'):
         logging.error(f"設定ファイル '{config_path}' の形式が正しくありません。")
         return None
 
+
 def initialize_kafka_producer(kafka_config):
     """Kafkaプロデューサーを初期化する"""
     try:
         producer = KafkaProducer(
-            bootstrap_servers=kafka_config.get('bootstrap_servers', 'localhost:9092').split(','),
+            bootstrap_servers=kafka_config.get(
+                'bootstrap_servers', 'localhost:9092').split(','),
             value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-            security_protocol=kafka_config.get('security_protocol', 'PLAINTEXT')
+            security_protocol=kafka_config.get(
+                'security_protocol', 'PLAINTEXT')
         )
-        logging.info(f"Kafkaプロデューサーを初期化しました: {kafka_config.get('bootstrap_servers')}")
+        logging.info(
+            f"Kafkaプロデューサーを初期化しました: {kafka_config.get('bootstrap_servers')}")
         return producer
     except Exception as e:
         logging.error(f"Kafkaプロデューサーの初期化に失敗しました: {e}")
         return None
 
-def create_trap_callback(producer, kafka_topic):
-    """SNMPトラップ受信時のコールバック関数を作成する"""
+
+def create_trap_callback(producer, kafka_topic, mib_view_controller=None):
+    """SNMPトラップ受信時のコールバック関数"""
     def trap_callback(snmpEngine, stateReference, _contextEngineId, contextName,
                       varBinds, _cbCtx):
-        _transportDomain, transportAddress = snmpEngine.msgAndPduDsp.get_transport_info(stateReference)
+
+        _transportDomain, transportAddress = snmpEngine.message_dispatcher.get_transport_info(
+            stateReference)
         source_ip, source_port = transportAddress
         community_name = contextName.prettyPrint()
 
-        logging.info(f"トラップを受信しました from {source_ip}:{source_port} (Community: {community_name})")
+        logging.info(
+            f"トラップを受信しました from {source_ip}:{source_port} (Community: {community_name})")
 
         trap_data = {
             "source_ip": source_ip,
             "source_port": source_port,
             "community": community_name,
             "protocol_version": "v1/v2c",
-            "timestamp": datetime.utcnow().isoformat() + 'Z',
+            "timestamp": datetime.now().isoformat() + 'Z',
             "variables": []
         }
 
         for oid, val in varBinds:
             try:
+                if mib_view_controller:
+                    try:
+                        # OIDをMIB名付き文字列に変換
+                        # ObjectTypeにはObjectIdentityインスタンスを渡す
+                        obj_type = ObjectType(
+                            ObjectIdentity(oid), val).resolveWithMib(mib_view_controller)
+                        # 例: SNMPv2-MIB::sysUpTime.0
+                        oid_str = obj_type[0].prettyPrint()
+                        oid_full = oid.prettyPrint()
+                    except error.SmiError as e:
+                        logging.warning(
+                            f"OIDの名前解決に失敗しました: OID={oid.prettyPrint()}, Error={e}")
+                        oid_str = oid.prettyPrint()
+                        oid_full = oid.prettyPrint()
+                else:
+                    oid_str = oid.prettyPrint()
+                    oid_full = oid.prettyPrint()
+
                 trap_data["variables"].append({
-                    "oid": str(oid),
-                    "oid_full": oid.prettyPrint(),
+                    "oid": oid_str,
+                    "oid_full": oid_full,
                     "value": val.prettyPrint(),
                     "value_type": val.__class__.__name__
                 })
             except Exception as e:
                 logging.warning(f"VarBindの解析中にエラーが発生しました: {e}")
+
+        logging.debug(f"トラップデータ: {trap_data}")
 
         try:
             future = producer.send(kafka_topic, trap_data)
@@ -91,6 +126,7 @@ def create_trap_callback(producer, kafka_topic):
 
     return trap_callback
 
+
 async def setup_snmp_engine(snmp_config, callback):
     """SNMP Engineをセットアップする"""
     host = snmp_config.get('host', '0.0.0.0')
@@ -99,9 +135,33 @@ async def setup_snmp_engine(snmp_config, callback):
 
     snmpEngine = engine.SnmpEngine()
 
-    # MIBs are expected to be in pysnmp_mibs directory
-    # mibBuilder = snmpEngine.get  ('mibBuilder')
-    # mibBuilder.add_mib_sources(builder.DirMibSource(str(Path(__file__).resolve().parent / "compiled_mibs")))
+    # MIB設定: コンパイル済みMIBを読み込む
+    mibBuilder = snmpEngine.get_mib_builder()
+    mibView = view.MibViewController(mibBuilder)
+    mib_source_path = (Path(__file__).resolve().parent /
+                       'tools' / 'compiled_mibs')
+    mib_source = None
+    if mib_source_path.is_dir():
+        logging.info(f"コンパイル済みMIBディレクトリを読み込みます: {mib_source_path}")
+        mib_source = builder.DirMibSource(str(mib_source_path))
+        mibBuilder.add_mib_sources(mib_source)
+        try:
+            mibBuilder.load_modules(
+                'SNMPv2-SMI',
+                'SNMPv2-TC',
+                'SNMPv2-CONF',
+                'INET-ADDRESS-MIB',
+                'HCNUM-TC',
+                'ARBOR-SMI',
+                'PEAKFLOW-SP-MIB',
+                'PEAKFLOW-DOS-MIB'
+            )
+            logging.info("カスタムMIBモジュールを正常にロードしました。")
+        except Exception as e:
+            logging.error(f"カスタムMIBモジュールのロード中にエラーが発生しました: {e}")
+    else:
+        logging.warning(
+            f"コンパイル済みMIBディレクトリが見つかりません: {mib_source_path}。OIDの名前解決は行われません。")
 
     config.add_transport(
         snmpEngine,
@@ -112,15 +172,16 @@ async def setup_snmp_engine(snmp_config, callback):
     for i, community in enumerate(communities):
         config.add_v1_system(snmpEngine, f'my-area-{i}', community)
 
-    ntfrcv.NotificationReceiver(snmpEngine, callback)
-    logging.info(f"SNMPトラップの待受を開始します: {host}:{port}, Communities: {communities}")
-    return snmpEngine
+    logging.info(
+        f"SNMPトラップの待受を開始します: {host}:{port}, Communities: {communities}")
+    return snmpEngine, mib_source
+
 
 def log_crash_report(e):
     """クラッシュレポートを/var/tmpに書き出す"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = f"/var/tmp/snmp_forwarder_crash_{timestamp}.log"
-    
+
     logging.critical(f"予期せぬエラーによりクラッシュしました。詳細は {log_file} を確認してください。")
 
     try:
@@ -131,6 +192,7 @@ def log_crash_report(e):
             traceback.print_exc(file=f)
     except IOError as io_err:
         logging.error(f"クラッシュレポートの書き込みに失敗しました: {io_err}")
+
 
 async def main():
     """メイン処理"""
@@ -160,17 +222,26 @@ async def main():
                 snmp_config = config_data.get('snmp', {})
                 kafka_config = config_data.get('kafka', {})
 
+                # producer, snmpEngine, trap_callback_handlerの初期化部分
                 producer = initialize_kafka_producer(kafka_config)
                 if not producer:
                     await asyncio.sleep(10)
                     continue
 
+                # setup_snmp_engineの返り値を2つ受け取る
+                snmpEngine, mib_source = await setup_snmp_engine(snmp_config, None)
+
+                mib_view_controller = view.MibViewController(
+                    snmpEngine.get_mib_builder())
+
                 trap_callback_handler = create_trap_callback(
                     producer,
-                    kafka_config.get('topic', 'snmp-traps')
+                    kafka_config.get('topic', 'snmp-traps'),
+                    mib_view_controller
                 )
 
-                snmpEngine = await setup_snmp_engine(snmp_config, trap_callback_handler)
+                # コールバック登録
+                ntfrcv.NotificationReceiver(snmpEngine, trap_callback_handler)
                 snmpEngine.transport_dispatcher.job_started(1)
 
             await asyncio.sleep(1)
