@@ -12,6 +12,7 @@ from pysnmp.entity.rfc3413 import ntfrcv
 from pysnmp.carrier.asyncio.dgram import udp
 from pysnmp.smi import builder, compiler
 from pysnmp.smi import view, error
+from pysnmp.smi.rfc1902 import ObjectType, ObjectIdentity
 
 
 # --- ロギング設定 ---
@@ -64,12 +65,11 @@ def initialize_kafka_producer(kafka_config):
         return None
 
 
-def create_trap_callback(producer, kafka_topic, mib_source=None):
+def create_trap_callback(producer, kafka_topic, mib_view_controller=None):
     """SNMPトラップ受信時のコールバック関数"""
     def trap_callback(snmpEngine, stateReference, _contextEngineId, contextName,
                       varBinds, _cbCtx):
-        # 必要に応じてmib_sourceを利用可能
-        # 例: logging.debug(f"mib_source: {mib_source}")
+
         _transportDomain, transportAddress = snmpEngine.message_dispatcher.get_transport_info(
             stateReference)
         source_ip, source_port = transportAddress
@@ -88,11 +88,28 @@ def create_trap_callback(producer, kafka_topic, mib_source=None):
         }
 
         for oid, val in varBinds:
-            breakpoint()
             try:
+                if mib_view_controller:
+                    try:
+                        # OIDをMIB名付き文字列に変換
+                        # ObjectTypeにはObjectIdentityインスタンスを渡す
+                        obj_type = ObjectType(
+                            ObjectIdentity(oid), val).resolveWithMib(mib_view_controller)
+                        # 例: SNMPv2-MIB::sysUpTime.0
+                        oid_str = obj_type[0].prettyPrint()
+                        oid_full = oid.prettyPrint()
+                    except error.SmiError as e:
+                        logging.warning(
+                            f"OIDの名前解決に失敗しました: OID={oid.prettyPrint()}, Error={e}")
+                        oid_str = oid.prettyPrint()
+                        oid_full = oid.prettyPrint()
+                else:
+                    oid_str = oid.prettyPrint()
+                    oid_full = oid.prettyPrint()
+
                 trap_data["variables"].append({
-                    "oid": str(oid),
-                    "oid_full": oid.prettyPrint(),
+                    "oid": oid_str,
+                    "oid_full": oid_full,
                     "value": val.prettyPrint(),
                     "value_type": val.__class__.__name__
                 })
@@ -213,13 +230,14 @@ async def main():
 
                 # setup_snmp_engineの返り値を2つ受け取る
                 snmpEngine, mib_source = await setup_snmp_engine(snmp_config, None)
-                # mib_source = None
-                # snmpEngine = await setup_snmp_engine(snmp_config, None)
+
+                mib_view_controller = view.MibViewController(
+                    snmpEngine.get_mib_builder())
 
                 trap_callback_handler = create_trap_callback(
                     producer,
                     kafka_config.get('topic', 'snmp-traps'),
-                    mib_source
+                    mib_view_controller
                 )
 
                 # コールバック登録
