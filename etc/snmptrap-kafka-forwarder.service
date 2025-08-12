@@ -9,8 +9,8 @@ Group=nogroup
 
 # 実行するコマンド
 # ExecStartのパスは環境に合わせて修正してください
-WorkingDirectory=/home/tanino/gemini-cli/20250719_snmptrap
-ExecStart=/usr/bin/python3 /home/tanino/gemini-cli/20250719_snmptrap/snmp_kafka_forwarder.py
+WorkingDirectory=snmptrap
+ExecStart=uv run python3 snmptrap_kafka_forwarder.py
 
 # SIGHUPによるリロード設定
 ExecReload=/bin/kill -HUP $MAINPID
