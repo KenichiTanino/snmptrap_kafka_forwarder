@@ -1,5 +1,5 @@
 [project]
-name = "snmptrap_to_kakfa"
+name = "snmptrap_kakfa_forwarder"
 version = "0.1.0"
 description = "snmp trap to kafka"
 readme = "README.md"
